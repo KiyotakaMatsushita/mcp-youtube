@@ -4,10 +4,8 @@
 import asyncio
 from pathlib import Path
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from mcp.server.fastmcp import FastMCP, Context
-import subprocess
-import os
 
 class UserError(Exception):
     """Error caused by user input"""
@@ -22,7 +20,7 @@ AUDIO_DIR = OUTPUT_DIR / "audio"
 SUBTITLE_DIR = OUTPUT_DIR / "subtitles"
 THUMBNAIL_DIR = OUTPUT_DIR / "thumbnails"
 
-def ensure_output_dirs():
+def ensure_output_dirs() -> None:
     """出力用のディレクトリを作成"""
     for directory in [VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR, THUMBNAIL_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
@@ -41,7 +39,7 @@ def get_output_template(media_type: str) -> str:
         return str(THUMBNAIL_DIR / f"{base_template}.%(ext)s")
     return base_template + ".%(ext)s"
 
-async def _run_yt_dlp(args: List[str], ctx: Optional[Context[Any, Any]] = None) -> str:
+async def _run_dl(args: List[str], ctx: Optional[Context[Any, Any]] = None) -> Union[str, Dict[str, Any]]:
     """Execute yt-dlp command and return output"""
     # ディレクトリの作成を確認
     ensure_output_dirs()
@@ -72,6 +70,13 @@ async def _run_yt_dlp(args: List[str], ctx: Optional[Context[Any, Any]] = None) 
         output = stdout.decode().strip()
         if ctx:
             await ctx.info(f"yt-dlp completed successfully: {output}")
+            
+        # Try to parse as JSON if --dump-json was used
+        if "--dump-json" in args:
+            try:
+                return Dict[str, Any](json.loads(output))
+            except json.JSONDecodeError:
+                pass
             
         return output
         
@@ -105,7 +110,9 @@ async def download_playlist(
         
     args.append(url)
     
-    output = await _run_yt_dlp(args, ctx)
+    output = await _run_dl(args, ctx)
+    if isinstance(output, dict):
+        raise UserError("Unexpected JSON output from yt-dlp")
     return [line for line in output.split("\n") if line.strip()]
 
 @server.tool(
@@ -126,7 +133,10 @@ async def download_audio(
         url
     ]
     
-    return await _run_yt_dlp(args, ctx)
+    output = await _run_dl(args, ctx)
+    if isinstance(output, dict):
+        raise UserError("Unexpected JSON output from yt-dlp")
+    return output
 
 @server.tool(
     name="get_metadata",
@@ -142,8 +152,10 @@ async def get_metadata(
         url
     ]
     
-    output = await _run_yt_dlp(args, ctx)
-    return json.loads(output)
+    result = await _run_dl(args, ctx)
+    if isinstance(result, dict):
+        return result
+    raise UserError("Failed to parse metadata as JSON")
 
 @server.tool(
     name="download_subtitles",
@@ -170,7 +182,10 @@ async def download_subtitles(
         
     args.append(url)
     
-    return await _run_yt_dlp(args, ctx)
+    output = await _run_dl(args, ctx)
+    if isinstance(output, dict):
+        raise UserError("Unexpected JSON output from yt-dlp")
+    return output
 
 @server.tool(
     name="download_video",
@@ -194,7 +209,10 @@ async def download_video(
         url
     ]
     
-    return await _run_yt_dlp(args, ctx)
+    output = await _run_dl(args, ctx)
+    if isinstance(output, dict):
+        raise UserError("Unexpected JSON output from yt-dlp")
+    return output
 
 @server.tool(
     name="download_thumbnail",
@@ -212,7 +230,10 @@ async def download_thumbnail(
         url
     ]
     
-    return await _run_yt_dlp(args, ctx)
+    output = await _run_dl(args, ctx)
+    if isinstance(output, dict):
+        raise UserError("Unexpected JSON output from yt-dlp")
+    return output
 
 @server.tool(
     name="download_with_limits",
@@ -234,7 +255,10 @@ async def download_with_limits(
     
     args.append(url)
     
-    return await _run_yt_dlp(args, ctx)
+    output = await _run_dl(args, ctx)
+    if isinstance(output, dict):
+        raise UserError("Unexpected JSON output from yt-dlp")
+    return output
 
 @server.tool(
     name="resume_download",
@@ -249,7 +273,10 @@ async def resume_download(
         url
     ]
     
-    return await _run_yt_dlp(args, ctx)
+    output = await _run_dl(args, ctx)
+    if isinstance(output, dict):
+        raise UserError("Unexpected JSON output from yt-dlp")
+    return output
 
 def main() -> None:
     server.run(transport="stdio")

@@ -1,6 +1,6 @@
 import pathlib
 import sys
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple, Union, Optional
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -17,11 +17,12 @@ def _make_stub(return_value: Union[List[str], List[Dict[str, Any]]]) -> Tuple[Ca
     """Return a stub function that captures its kwargs and returns value."""
     captured: Dict[str, Any] = {}
 
-    async def _stub(urls: List[str], ydl_opts: Dict[str, Any], ctx: Context[Any, Any]) -> List[Any]:
-        captured["urls"] = urls
-        captured["ydl_opts"] = ydl_opts
+    async def _stub(args: List[str], ctx: Optional[Context[Any, Any]] = None) -> Any:
+        captured["args"] = args
         # Simulate the path list expected by callers
-        return return_value
+        if isinstance(return_value[0], dict):
+            return return_value[0]
+        return return_value[0]
 
     return _stub, captured
 
@@ -49,10 +50,12 @@ async def test_download_video(monkeypatch: pytest.MonkeyPatch, mock_context: Con
     )
 
     assert result == "/path/to/video.mp4"
-    assert captured["urls"] == ["https://youtu.be/dummy"]
-    assert captured["ydl_opts"]["merge_output_format"] == "mp4"
+    assert "--format" in captured["args"]
+    assert "--merge-output-format" in captured["args"]
+    assert "mp4" in captured["args"]
     # Ensure format string reflects resolution cap (720p -> height<=720)
-    assert "height<=720" in captured["ydl_opts"]["format"]
+    format_str = captured["args"][captured["args"].index("--format") + 1]
+    assert "height<=720" in format_str
 
 
 @pytest.mark.asyncio
@@ -68,10 +71,11 @@ async def test_download_audio(monkeypatch: pytest.MonkeyPatch, mock_context: Con
     )
 
     assert result == "/path/to/audio.mp3"
-    postprocessors = captured["ydl_opts"]["postprocessors"]
-    assert postprocessors[0]["key"] == "FFmpegExtractAudio"
-    assert postprocessors[0]["preferredcodec"] == "mp3"
-    assert postprocessors[0]["preferredquality"] == "192"
+    assert "--extract-audio" in captured["args"]
+    assert "--audio-format" in captured["args"]
+    assert "mp3" in captured["args"]
+    assert "--audio-quality" in captured["args"]
+    assert "192" in captured["args"]
 
 
 @pytest.mark.asyncio
@@ -93,18 +97,20 @@ async def test_download_with_limits(monkeypatch: pytest.MonkeyPatch, mock_contex
     )
 
     assert result == "/path/to/video.mp4"
-    # 10 MB -> bytes
-    assert captured["ydl_opts"]["max_filesize"] == str(10 * 1024 * 1024)
-    # 2 min -> seconds
-    assert captured["ydl_opts"]["max_duration"] == str(120)
+    assert "--max-filesize" in captured["args"]
+    assert "10M" in captured["args"]
+    assert "--max-duration" in captured["args"]
+    assert "120" in captured["args"]
 
 
 @pytest.mark.asyncio
 async def test_get_metadata(monkeypatch: pytest.MonkeyPatch, mock_context: Context[Any, Any]) -> None:
     dummy_info = {"title": "Dummy", "duration": 60}
-    stub, _captured = _make_stub([dummy_info])
+    stub, captured = _make_stub([dummy_info])
     monkeypatch.setattr(mcp_youtube, "_run_dl", stub)
 
     result = await mcp_youtube.get_metadata("https://youtu.be/dummy", ctx=mock_context)
 
-    assert result == dummy_info 
+    assert result == dummy_info
+    assert "--dump-json" in captured["args"]
+    assert "--no-download" in captured["args"] 
