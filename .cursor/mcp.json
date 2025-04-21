@@ -1,7 +1,14 @@
 {
   "mcpServers": {
     "youtube": {
-      "command": "mcp-youtube"
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/Users/kiyotakamatsushita/Workplaces/mcp-youtube",
+        "run",
+        "python",
+        "mcp_youtube.py"
+      ]
     }
   }
 }

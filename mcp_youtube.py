@@ -1,115 +1,84 @@
 #!/usr/bin/env python3
 """MCP-YouTube - A MCP server wrapper for yt-dlp"""
 
+import asyncio
 from pathlib import Path
+import json
 from typing import List, Dict, Any, Optional
 from mcp.server.fastmcp import FastMCP, Context
-from yt_dlp import YoutubeDL
+import subprocess
+import os
 
 class UserError(Exception):
     """Error caused by user input"""
     pass
 
 server = FastMCP("mcp-youtube")
-OUTTMPL = "%(title)s [%(id)s].%(ext)s"
 
-async def _progress_hook(d: Dict[str, Any], ctx: Context[Any, Any]) -> None:
-    """Log download progress"""
-    status = d["status"]
-    if status == "downloading":
-        if "_percent_str" in d:
-            await ctx.info(
-                f"Downloading: {d['_percent_str'].strip()} Speed: {d.get('_speed_str', 'N/A')} ETA: {d.get('_eta_str', 'N/A')}"
-            )
-    elif status == "finished":
-        await ctx.info(f"Download complete: {d['filename']}")
-    elif status == "error":
-        await ctx.error(f"Download error: {d.get('error', 'Unknown error')}")
+# 出力ディレクトリの定義
+OUTPUT_DIR = Path("downloads")
+VIDEO_DIR = OUTPUT_DIR / "videos"
+AUDIO_DIR = OUTPUT_DIR / "audio"
+SUBTITLE_DIR = OUTPUT_DIR / "subtitles"
+THUMBNAIL_DIR = OUTPUT_DIR / "thumbnails"
 
-async def _logging_func(msg: Dict[str, Any], ctx: Context[Any, Any]) -> None:
-    """Forward yt-dlp log messages to MCP logs"""
-    message = msg.get("msg", "")
-    if msg.get("type") == "info":
-        await ctx.info(f"yt-dlp: {message}")
-    elif msg.get("type") == "warning":
-        await ctx.info(f"yt-dlp warning: {message}")
-    elif msg.get("type") == "error":
-        await ctx.error(f"yt-dlp error: {message}")
+def ensure_output_dirs():
+    """出力用のディレクトリを作成"""
+    for directory in [VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR, THUMBNAIL_DIR]:
+        directory.mkdir(parents=True, exist_ok=True)
 
-async def _run_dl(urls: List[str], ydl_opts: Dict[str, Any], ctx: Context[Any, Any]) -> List[str]:
-    """Execute download and return list of saved file paths"""
-    paths: List[str] = []
+# 出力テンプレートの更新
+def get_output_template(media_type: str) -> str:
+    """メディアタイプに応じた出力テンプレートを返す"""
+    base_template = "%(title)s [%(id)s]"
+    if media_type == "video":
+        return str(VIDEO_DIR / f"{base_template}.%(ext)s")
+    elif media_type == "audio":
+        return str(AUDIO_DIR / f"{base_template}.%(ext)s")
+    elif media_type == "subtitle":
+        return str(SUBTITLE_DIR / f"{base_template}.%(lang)s.%(ext)s")
+    elif media_type == "thumbnail":
+        return str(THUMBNAIL_DIR / f"{base_template}.%(ext)s")
+    return base_template + ".%(ext)s"
+
+async def _run_yt_dlp(args: List[str], ctx: Optional[Context[Any, Any]] = None) -> str:
+    """Execute yt-dlp command and return output"""
+    # ディレクトリの作成を確認
+    ensure_output_dirs()
     
-    # Set base options
-    base_opts = {
-        "progress_hooks": [lambda d: ctx.info(
-            f"Progress: {d.get('_percent_str', 'N/A')} "
-            f"Speed: {d.get('_speed_str', 'N/A')} "
-            f"ETA: {d.get('_eta_str', 'N/A')}"
-        ) if d.get("status") == "downloading" and "_percent_str" in d else None],
-        "logger": lambda msg: ctx.info(
-            f"yt-dlp: {msg.get('msg', '')}"
-        ) if msg.get("type") == "info" else (
-            ctx.error(f"yt-dlp error: {msg.get('msg', '')}") if msg.get("type") == "error" else None
-        ),
-        "quiet": False,
-        "no_warnings": False,
-        "ignoreerrors": False,
-        "nooverwrites": True,
-        "retries": 3,
-    }
-    ydl_opts.update(base_opts)
+    base_args = ["yt-dlp", "--no-warnings"]
     
-    with YoutubeDL(ydl_opts) as ydl:
-        for url in urls:
-            await ctx.info(f"Processing URL: {url}")
-            try:
-                # Check video availability and restrictions
-                info = ydl.extract_info(url, download=False)
-                
-                if info.get("duration"):
-                    await ctx.info(
-                        f"Video info: {info.get('title', 'Unknown')} "
-                        f"Duration: {info.get('duration', 0)}s "
-                        f"Size: {info.get('filesize', 0)} bytes "
-                        f"Format: {info.get('format', 'Unknown')}"
-                    )
-                
-                # Check size/duration limits if specified
-                if ydl_opts.get("max_duration") and info.get("duration", 0) > ydl_opts["max_duration"]:
-                    msg = f"Video duration ({info['duration']} seconds) exceeds limit ({ydl_opts['max_duration']} seconds)"
-                    await ctx.error(msg)
-                    raise UserError(msg)
-                
-                if ydl_opts.get("max_filesize") and info.get("filesize", 0) > ydl_opts["max_filesize"]:
-                    msg = f"File size ({info['filesize']} bytes) exceeds limit ({ydl_opts['max_filesize']} bytes)"
-                    await ctx.error(msg)
-                    raise UserError(msg)
-                
-                # Proceed with download
-                info = ydl.extract_info(url, download=not ydl_opts.get("skip_download"))
-                if ydl_opts.get("skip_download"):
-                    paths.append(info)
-                    continue
-                
-                path = Path(ydl.prepare_filename(info))
-                if ydl_opts.get("merge_output_format"):
-                    path = path.with_suffix(f".{ydl_opts['merge_output_format']}")
-                paths.append(str(path.resolve()))
-                
-                await ctx.info(
-                    f"File saved: {path} "
-                    f"Title: {info.get('title', 'Unknown')} "
-                    f"Format: {info.get('format', 'Unknown')} "
-                    f"Size: {info.get('filesize', 0)} bytes "
-                    f"Duration: {info.get('duration', 0)}s"
-                )
-            except Exception as e:
-                msg = f"Download failed for {url}: {str(e)}"
-                await ctx.error(msg)
-                raise UserError(msg)
+    # Add output template - moved to individual functions
     
-    return paths
+    # Combine with user args
+    cmd = base_args + args
+    
+    try:
+        # Run yt-dlp command
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            error_msg = stderr.decode() if stderr else "Unknown error"
+            if ctx:
+                await ctx.error(f"yt-dlp error: {error_msg}")
+            raise UserError(f"yt-dlp failed: {error_msg}")
+            
+        output = stdout.decode().strip()
+        if ctx:
+            await ctx.info(f"yt-dlp completed successfully: {output}")
+            
+        return output
+        
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"Failed to run yt-dlp: {str(e)}")
+        raise UserError(f"Failed to run yt-dlp: {str(e)}")
 
 @server.tool(
     name="download_playlist",
@@ -121,18 +90,23 @@ async def download_playlist(
     end: Optional[int] = None,
     ctx: Optional[Context[Any, Any]] = None
 ) -> List[str]:
-    if not ctx:
-        raise ValueError("Context is required")
     if "playlist" not in url:
         raise UserError("Please provide a playlist URL.")
-    ydl_opts = {
-        "outtmpl": OUTTMPL,
-        "format": "bv*+ba/b",
-        "merge_output_format": "mp4",
-        "playliststart": start,
-        "playlistend": end,
-    }
-    return await _run_dl([url], ydl_opts, ctx)
+        
+    args = [
+        "--format", "bv*+ba/b",
+        "--merge-output-format", "mp4",
+        "--playlist-start", str(start),
+        "--output", get_output_template("video")
+    ]
+    
+    if end:
+        args.extend(["--playlist-end", str(end)])
+        
+    args.append(url)
+    
+    output = await _run_yt_dlp(args, ctx)
+    return [line for line in output.split("\n") if line.strip()]
 
 @server.tool(
     name="download_audio",
@@ -144,19 +118,15 @@ async def download_audio(
     quality: str = "192K",
     ctx: Optional[Context[Any, Any]] = None
 ) -> str:
-    if not ctx:
-        raise ValueError("Context is required")
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": OUTTMPL,
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": codec,
-            "preferredquality": quality.rstrip("Kk"),
-        }],
-    }
-    result = await _run_dl([url], ydl_opts, ctx)
-    return result[0]
+    args = [
+        "--extract-audio",
+        "--audio-format", codec,
+        "--audio-quality", quality.rstrip("Kk"),
+        "--output", get_output_template("audio"),
+        url
+    ]
+    
+    return await _run_yt_dlp(args, ctx)
 
 @server.tool(
     name="get_metadata",
@@ -166,14 +136,14 @@ async def get_metadata(
     url: str,
     ctx: Optional[Context[Any, Any]] = None
 ) -> Dict[str, Any]:
-    if not ctx:
-        raise ValueError("Context is required")
-    result = await _run_dl([url], {"skip_download": True}, ctx)
-    info = result[0]
-    try:
-        return dict(info)  # type: ignore
-    except (TypeError, ValueError):
-        raise ValueError("Failed to convert metadata to dictionary")
+    args = [
+        "--dump-json",
+        "--no-download",
+        url
+    ]
+    
+    output = await _run_yt_dlp(args, ctx)
+    return json.loads(output)
 
 @server.tool(
     name="download_subtitles",
@@ -185,17 +155,22 @@ async def download_subtitles(
     embed: bool = False,
     ctx: Optional[Context[Any, Any]] = None
 ) -> str:
-    if not ctx:
-        raise ValueError("Context is required")
-    ydl_opts = {
-        "writesubtitles": True,
-        "subtitleslangs": [lang],
-        "embedsubtitles": embed,
-        "skip_download": False,
-        "outtmpl": OUTTMPL,
-    }
-    result = await _run_dl([url], ydl_opts, ctx)
-    return result[0]
+    args = [
+        "--write-sub",
+        "--write-auto-sub",
+        "--sub-lang", lang,
+        "--sub-format", "vtt",
+        "--output", get_output_template("subtitle"),
+    ]
+    
+    if embed:
+        args.append("--embed-subs")
+    else:
+        args.append("--skip-download")
+        
+    args.append(url)
+    
+    return await _run_yt_dlp(args, ctx)
 
 @server.tool(
     name="download_video",
@@ -208,19 +183,18 @@ async def download_video(
     resolution: str = "1080p",
     ctx: Optional[Context[Any, Any]] = None
 ) -> str:
-    if not ctx:
-        raise ValueError("Context is required")
     format_spec = f"bestvideo[height<={resolution[:-1]}]+bestaudio/best"
     if quality == "worst":
         format_spec = "worstvideo+worstaudio/worst"
     
-    ydl_opts = {
-        "format": format_spec,
-        "outtmpl": OUTTMPL,
-        "merge_output_format": format,
-    }
-    result = await _run_dl([url], ydl_opts, ctx)
-    return result[0]
+    args = [
+        "--format", format_spec,
+        "--merge-output-format", format,
+        "--output", get_output_template("video"),
+        url
+    ]
+    
+    return await _run_yt_dlp(args, ctx)
 
 @server.tool(
     name="download_thumbnail",
@@ -230,19 +204,15 @@ async def download_thumbnail(
     url: str,
     ctx: Optional[Context[Any, Any]] = None
 ) -> str:
-    if not ctx:
-        raise ValueError("Context is required")
-    ydl_opts = {
-        "outtmpl": OUTTMPL,
-        "writethumbnail": True,
-        "skip_download": True,
-        "postprocessors": [{
-            "key": "FFmpegThumbnailsConvertor",
-            "format": "jpg",
-        }],
-    }
-    result = await _run_dl([url], ydl_opts, ctx)
-    return result[0]
+    args = [
+        "--write-thumbnail",
+        "--skip-download",
+        "--convert-thumbnails", "jpg",
+        "--output", get_output_template("thumbnail"),
+        url
+    ]
+    
+    return await _run_yt_dlp(args, ctx)
 
 @server.tool(
     name="download_with_limits",
@@ -254,21 +224,17 @@ async def download_with_limits(
     max_duration: Optional[float] = None,  # in minutes
     ctx: Optional[Context[Any, Any]] = None
 ) -> str:
-    if not ctx:
-        raise ValueError("Context is required")
-    ydl_opts = {
-        "outtmpl": OUTTMPL,
-        "format": "best",
-    }
+    args = ["--format", "best"]
     
     if max_filesize is not None:
-        ydl_opts["max_filesize"] = str(int(max_filesize * 1024 * 1024))  # Convert to bytes
+        args.extend(["--max-filesize", f"{int(max_filesize)}M"])
     
     if max_duration is not None:
-        ydl_opts["max_duration"] = str(int(max_duration * 60))  # Convert to seconds
+        args.extend(["--max-duration", str(int(max_duration * 60))])
     
-    result = await _run_dl([url], ydl_opts, ctx)
-    return result[0]
+    args.append(url)
+    
+    return await _run_yt_dlp(args, ctx)
 
 @server.tool(
     name="resume_download",
@@ -278,14 +244,12 @@ async def resume_download(
     url: str,
     ctx: Optional[Context[Any, Any]] = None
 ) -> str:
-    if not ctx:
-        raise ValueError("Context is required")
-    ydl_opts = {
-        "outtmpl": OUTTMPL,
-        "continuedl": True,
-    }
-    result = await _run_dl([url], ydl_opts, ctx)
-    return result[0]
+    args = [
+        "--continue",
+        url
+    ]
+    
+    return await _run_yt_dlp(args, ctx)
 
 def main() -> None:
     server.run(transport="stdio")
