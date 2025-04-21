@@ -9,7 +9,7 @@ dependencies = [
     "yt-dlp>=2025.3.31",
 ]
 license = "MIT"
-authors = ["Kiyotaka Matsushita <kiyotaka.86@gmail.com>"]
+authors = ["KiyotakaMatsushita <kiyotaka.86@gmail.com>"]
 
 [dependency-groups]
 dev = [
