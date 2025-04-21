@@ -4,7 +4,7 @@
 import asyncio
 from pathlib import Path
 import json
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, cast
 from mcp.server.fastmcp import FastMCP, Context
 
 class UserError(Exception):
@@ -66,7 +66,7 @@ async def _run_dl(args: List[str], ctx: Optional[Context[Any, Any]] = None) -> U
             
         if "--dump-json" in args:
             try:
-                return json.loads(output)
+                return cast(Dict[str, Any], json.loads(output))
             except json.JSONDecodeError:
                 pass
             
@@ -150,7 +150,7 @@ async def get_metadata(
     result = await _run_dl(args, ctx)
     if isinstance(result, str):
         try:
-            return json.loads(result)
+            return cast(Dict[str, Any], json.loads(result))
         except json.JSONDecodeError as e:
             raise UserError(f"Failed to parse metadata as JSON: {str(e)}")
     return result
