@@ -84,7 +84,7 @@ async def _run_dl(args: List[str], ctx: Optional[Context[Any, Any]] = None) -> U
 async def download_playlist(
     url: str,
     start: int = 1,
-    end: Optional[int] = None,
+    end: int = 0,
     ctx: Optional[Context[Any, Any]] = None
 ) -> List[str]:
     """Download videos from a playlist"""
@@ -98,7 +98,7 @@ async def download_playlist(
         "--output", get_output_template("video")
     ]
     
-    if end:
+    if end > 0:
         args.extend(["--playlist-end", str(end)])
         
     args.append(url)
