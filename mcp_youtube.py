@@ -13,7 +13,7 @@ class UserError(Exception):
 
 server = FastMCP("mcp-youtube")
 
-# 出力ディレクトリの定義
+# Define output directories
 OUTPUT_DIR = Path("downloads")
 VIDEO_DIR = OUTPUT_DIR / "videos"
 AUDIO_DIR = OUTPUT_DIR / "audio"
@@ -21,13 +21,12 @@ SUBTITLE_DIR = OUTPUT_DIR / "subtitles"
 THUMBNAIL_DIR = OUTPUT_DIR / "thumbnails"
 
 def ensure_output_dirs() -> None:
-    """出力用のディレクトリを作成"""
+    """Create output directories if they don't exist"""
     for directory in [VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR, THUMBNAIL_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
 
-# 出力テンプレートの更新
 def get_output_template(media_type: str) -> str:
-    """メディアタイプに応じた出力テンプレートを返す"""
+    """Return output template based on media type"""
     base_template = "%(title)s [%(id)s]"
     if media_type == "video":
         return str(VIDEO_DIR / f"{base_template}.%(ext)s")
@@ -41,18 +40,12 @@ def get_output_template(media_type: str) -> str:
 
 async def _run_dl(args: List[str], ctx: Optional[Context[Any, Any]] = None) -> Union[str, Dict[str, Any]]:
     """Execute yt-dlp command and return output"""
-    # ディレクトリの作成を確認
     ensure_output_dirs()
     
     base_args = ["yt-dlp", "--no-warnings"]
-    
-    # Add output template - moved to individual functions
-    
-    # Combine with user args
     cmd = base_args + args
     
     try:
-        # Run yt-dlp command
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -71,10 +64,9 @@ async def _run_dl(args: List[str], ctx: Optional[Context[Any, Any]] = None) -> U
         if ctx:
             await ctx.info(f"yt-dlp completed successfully: {output}")
             
-        # Try to parse as JSON if --dump-json was used
         if "--dump-json" in args:
             try:
-                return Dict[str, Any](json.loads(output))
+                return json.loads(output)
             except json.JSONDecodeError:
                 pass
             
@@ -95,6 +87,7 @@ async def download_playlist(
     end: Optional[int] = None,
     ctx: Optional[Context[Any, Any]] = None
 ) -> List[str]:
+    """Download videos from a playlist"""
     if "playlist" not in url:
         raise UserError("Please provide a playlist URL.")
         
@@ -125,6 +118,7 @@ async def download_audio(
     quality: str = "192K",
     ctx: Optional[Context[Any, Any]] = None
 ) -> str:
+    """Extract and download audio from video"""
     args = [
         "--extract-audio",
         "--audio-format", codec,
@@ -146,6 +140,7 @@ async def get_metadata(
     url: str,
     ctx: Optional[Context[Any, Any]] = None
 ) -> Dict[str, Any]:
+    """Get video metadata"""
     args = [
         "--dump-json",
         "--no-download",
@@ -153,9 +148,12 @@ async def get_metadata(
     ]
     
     result = await _run_dl(args, ctx)
-    if isinstance(result, dict):
-        return result
-    raise UserError("Failed to parse metadata as JSON")
+    if isinstance(result, str):
+        try:
+            return json.loads(result)
+        except json.JSONDecodeError as e:
+            raise UserError(f"Failed to parse metadata as JSON: {str(e)}")
+    return result
 
 @server.tool(
     name="download_subtitles",
@@ -167,6 +165,7 @@ async def download_subtitles(
     embed: bool = False,
     ctx: Optional[Context[Any, Any]] = None
 ) -> str:
+    """Download subtitles and optionally embed them into the video"""
     args = [
         "--write-sub",
         "--write-auto-sub",
@@ -198,6 +197,7 @@ async def download_video(
     resolution: str = "1080p",
     ctx: Optional[Context[Any, Any]] = None
 ) -> str:
+    """Download a single video with specified quality options"""
     format_spec = f"bestvideo[height<={resolution[:-1]}]+bestaudio/best"
     if quality == "worst":
         format_spec = "worstvideo+worstaudio/worst"
@@ -222,6 +222,7 @@ async def download_thumbnail(
     url: str,
     ctx: Optional[Context[Any, Any]] = None
 ) -> str:
+    """Download video thumbnail in the highest available quality"""
     args = [
         "--write-thumbnail",
         "--skip-download",
@@ -235,50 +236,8 @@ async def download_thumbnail(
         raise UserError("Unexpected JSON output from yt-dlp")
     return output
 
-@server.tool(
-    name="download_with_limits",
-    description="Download video with size and duration limits.",
-)
-async def download_with_limits(
-    url: str,
-    max_filesize: Optional[float] = None,  # in MB
-    max_duration: Optional[float] = None,  # in minutes
-    ctx: Optional[Context[Any, Any]] = None
-) -> str:
-    args = ["--format", "best"]
-    
-    if max_filesize is not None:
-        args.extend(["--max-filesize", f"{int(max_filesize)}M"])
-    
-    if max_duration is not None:
-        args.extend(["--max-duration", str(int(max_duration * 60))])
-    
-    args.append(url)
-    
-    output = await _run_dl(args, ctx)
-    if isinstance(output, dict):
-        raise UserError("Unexpected JSON output from yt-dlp")
-    return output
-
-@server.tool(
-    name="resume_download",
-    description="Resume a partially downloaded video.",
-)
-async def resume_download(
-    url: str,
-    ctx: Optional[Context[Any, Any]] = None
-) -> str:
-    args = [
-        "--continue",
-        url
-    ]
-    
-    output = await _run_dl(args, ctx)
-    if isinstance(output, dict):
-        raise UserError("Unexpected JSON output from yt-dlp")
-    return output
-
 def main() -> None:
+    """Main entry point"""
     server.run(transport="stdio")
 
 if __name__ == "__main__":

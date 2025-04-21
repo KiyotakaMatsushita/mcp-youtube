@@ -58,8 +58,6 @@ The banner should show:
 | `download_audio` | Extract audio only (mp3 / aac / opus …) |
 | `download_subtitles` | Fetch or embed subtitles |
 | `download_thumbnail` | Highest‑quality thumbnail |
-| `download_with_limits` | Enforce max file size / duration |
-| `resume_download` | Resume a partial download |
 | `get_metadata` | Return video metadata as JSON |
 
 ### 📂 Output paths

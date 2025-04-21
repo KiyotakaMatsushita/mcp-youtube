@@ -85,25 +85,6 @@ async def test_download_playlist_invalid_url(mock_context: Context[Any, Any]) ->
 
 
 @pytest.mark.asyncio
-async def test_download_with_limits(monkeypatch: pytest.MonkeyPatch, mock_context: Context[Any, Any]) -> None:
-    stub, captured = _make_stub(["/path/to/video.mp4"])
-    monkeypatch.setattr(mcp_youtube, "_run_dl", stub)
-
-    result = await mcp_youtube.download_with_limits(
-        "https://youtu.be/dummy",
-        max_filesize=10,
-        max_duration=2,
-        ctx=mock_context
-    )
-
-    assert result == "/path/to/video.mp4"
-    assert "--max-filesize" in captured["args"]
-    assert "10M" in captured["args"]
-    assert "--max-duration" in captured["args"]
-    assert "120" in captured["args"]
-
-
-@pytest.mark.asyncio
 async def test_get_metadata(monkeypatch: pytest.MonkeyPatch, mock_context: Context[Any, Any]) -> None:
     dummy_info = {"title": "Dummy", "duration": 60}
     stub, captured = _make_stub([dummy_info])
