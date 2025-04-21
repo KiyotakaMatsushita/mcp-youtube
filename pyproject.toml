@@ -1,13 +1,15 @@
 [project]
 name = "mcp-youtube"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "MCP server wrapping yt-dlp for video/audio/subtitle download via FastMCP"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=2.2.1",
     "yt-dlp>=2025.3.31",
 ]
+license = "MIT"
+authors = ["Kiyotaka Matsushita <kiyotaka.86@gmail.com>"]
 
 [dependency-groups]
 dev = [
@@ -15,3 +17,6 @@ dev = [
     "mypy>=1.15.0",
     "ruff>=0.11.6",
 ]
+
+[project.scripts]
+mcp-youtube = "mcp_youtube:main"

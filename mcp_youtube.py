@@ -254,5 +254,9 @@ def resume_download(url: str, ctx: Context = None) -> str:
     }
     return _run_dl([url], ydl_opts, ctx)[0]
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console‑script entrypoint (runs the MCP server)."""
     server.run()
+
+if __name__ == "__main__":
+    main()
