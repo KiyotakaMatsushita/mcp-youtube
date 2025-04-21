@@ -16,7 +16,16 @@ dev = [
     "black>=25.1.0",
     "mypy>=1.15.0",
     "ruff>=0.11.6",
+    "pytest>=8.3.5",
+    "poethepoet>=0.33.1",
 ]
 
 [project.scripts]
 mcp-youtube = "mcp_youtube:main"
+
+[tool.poe.tasks]
+lint      = "ruff check ."
+format    = "black ."
+typecheck = "mypy ."
+test      = "pytest"
+check     = ["lint", "typecheck", "test"]
